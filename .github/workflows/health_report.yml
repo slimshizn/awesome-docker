@@ -1,0 +1,68 @@
+name: Weekly Health Report
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: health-report-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # ratchet:actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build -o awesome-docker ./cmd/awesome-docker
+
+      - name: Run Health + Report
+        id: report
+        run: ./awesome-docker ci health-report --issue-file health_report.txt --github-output "$GITHUB_OUTPUT"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create/Update Issue with Health Report
+        if: steps.report.outputs.has_report == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # ratchet:actions/github-script@v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('health_report.txt', 'utf8');
+            const issueBody = report;
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'health-report',
+              per_page: 1
+            });
+
+            if (issues.data.length > 0) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues.data[0].number,
+                body: issueBody
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Weekly Health Report - Repository Maintenance Needed',
+                body: issueBody,
+                labels: ['health-report', 'maintenance']
+              });
+            }

@@ -10,3 +10,9 @@ website/table.html
 
 .idea
 **/.DS_Store
+.worktrees
+
+# Go
+/awesome-docker
+/.claude/*
+!/.claude/skills/
